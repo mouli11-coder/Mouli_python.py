@@ -1,1 +1,560 @@
+import streamlit as st
+import pandas as pd
+from pathlib import Path
+
+# Page settings
+st.set_page_config(
+    page_title="SmartStock | Retail Intelligence",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# SmartStock professional styling
+
+st.markdown("""
+<style>
+/* Main page background */
+.stApp {
+    background-color: #F3F6FC;
+    color: #26364D;
+}
+
+/* Fix all dashboard headings */
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3,
+[data-testid="stAppViewContainer"] [data-testid="stMarkdownContainer"] h1,
+[data-testid="stAppViewContainer"] [data-testid="stMarkdownContainer"] h2,
+[data-testid="stAppViewContainer"] [data-testid="stMarkdownContainer"] h3 {
+    color: #16325C !important;
+    -webkit-text-fill-color: #16325C !important;
+    opacity: 1 !important;
+}
+
+/* Normal text and captions */
+[data-testid="stAppViewContainer"] p,
+[data-testid="stAppViewContainer"] label,
+[data-testid="stAppViewContainer"] [data-testid="stCaptionContainer"] * {
+    color: #334155 !important;
+    -webkit-text-fill-color: #334155 !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #172554;
+}
+
+[data-testid="stSidebar"] * {
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+}
+
+/* KPI cards */
+[data-testid="stMetric"] {
+    background-color: #FFFFFF;
+    border: 1px solid #DCE6F2;
+    border-left: 5px solid #2563EB;
+    padding: 20px;
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+[data-testid="stMetricLabel"] {
+    color: #475569 !important;
+}
+
+[data-testid="stMetricValue"] {
+    color: #16325C !important;
+}
+
+/* Tables and layout */
+.block-container {
+    max-width: 1600px;
+    padding: 2rem;
+}
+
+[data-testid="stDataFrame"] {
+    background-color: #FFFFFF;
+    border-radius: 10px;
+}
+
+/* Fix sidebar text visibility */
+[data-testid="stSidebar"],
+[data-testid="stSidebar"] * {
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+}
+
+/* Make sidebar captions readable */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] * {
+    color: #D6E4FF !important;
+    -webkit-text-fill-color: #D6E4FF !important;
+}
+
+/* Keep selected menu item readable */
+[data-testid="stSidebar"] [aria-checked="true"] *,
+[data-testid="stSidebar"] [aria-checked="true"] {
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# Sidebar navigation
+st.sidebar.title("📦 SmartStock")
+st.sidebar.caption("Retail Intelligence Platform")
+
+
+page = st.sidebar.radio(
+    "Choose a page",
+    [
+        "Dashboard",
+        "Sales Analysis",
+        "Inventory Management",
+        "Sales Entry",
+        "Business Recommendations"
+    ]
+)
+
+
+st.sidebar.divider()
+st.sidebar.caption("Smart Retail Demand & Inventory Intelligence")
+
+
+# Load CSV files
+BASE_DIR = Path(__file__).parent
+
+try:
+    products_df = pd.read_csv(BASE_DIR / "products.csv")
+    sales_df = pd.read_csv(BASE_DIR / "sales.csv")
+
+    # Check required columns
+    required_products = [
+        "Product", "Purchase_Price", "Selling_Price", "Stock"
+    ]
+    required_sales = ["Product", "Quantity_Sold"]
+
+    if not all(col in products_df.columns for col in required_products):
+        st.error("Check the column names in products.csv.")
+        st.stop()
+
+    if not all(col in sales_df.columns for col in required_sales):
+        st.error("Check the column names in sales.csv.")
+        st.stop()
+
+    # Prepare numeric data
+    for col in ["Purchase_Price", "Selling_Price", "Stock"]:
+        products_df[col] = pd.to_numeric(
+            products_df[col], errors="raise"
+        )
+
+    sales_df["Quantity_Sold"] = pd.to_numeric(
+        sales_df["Quantity_Sold"], errors="raise"
+    )
+
+    # Summarize sales by product
+    sales_summary = sales_df.groupby(
+        "Product", as_index=False
+    )["Quantity_Sold"].sum()
+
+    # Combine product and sales information
+    df = products_df.merge(
+        sales_summary, on="Product", how="left"
+    )
+
+    df["Quantity_Sold"] = df["Quantity_Sold"].fillna(0)
+
+    # Calculate business metrics
+    df["Revenue"] = df["Selling_Price"] * df["Quantity_Sold"]
+
+    df["Profit"] = (
+        df["Selling_Price"] - df["Purchase_Price"]
+    ) * df["Quantity_Sold"]
+
+    # Basic restocking estimate
+    df["Recommended_Order"] = (
+        df["Quantity_Sold"] * 2 - df["Stock"]
+    ).clip(lower=0)
+
+    def get_stock_advice(row):
+        if row["Stock"] <= 10:
+            return "Urgent Restock"
+        elif row["Stock"] <= 20:
+            return "Restock Soon"
+        elif row["Recommended_Order"] > 0:
+            return "Check Demand"
+        return "Stock Healthy"
+
+    df["Stock_Advice"] = df.apply(get_stock_advice, axis=1)
+
+    if df.empty:
+        st.warning("No product data found in products.csv.")
+        st.stop()
+
+    # -----------------------------------
+    # PAGE 1: DASHBOARD
+    # -----------------------------------
+    if page == "Dashboard":
+        st.title("📦 SmartStock Dashboard")
+        st.caption("Retail Sales and Inventory Intelligence")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "Products", len(df)
+        )
+        col2.metric(
+            "Total Revenue", f"₹{df['Revenue'].sum():,.2f}"
+        )
+        col3.metric(
+            "Total Profit", f"₹{df['Profit'].sum():,.2f}"
+        )
+
+        
+        col4, col5 = st.columns(2)
+
+        with col4:
+          st.subheader("📈 Units Sold by Product")
+          st.bar_chart(
+             df.set_index("Product")[["Quantity_Sold"]],
+             height=400
+        )
+
+        with col5:
+          st.subheader("💰 Profit by Product")
+          st.bar_chart(
+            df.set_index("Product")[["Profit"]],
+            height=400
+        )
+
+        st.subheader("📦 Product Overview")
+        st.dataframe(
+          df,
+         use_container_width=True,
+         hide_index=True,
+        height=300
+    )
+
+
+    # -----------------------------------
+    # PAGE 2: SALES ANALYSIS
+    # -----------------------------------
+    elif page == "Sales Analysis":
+        st.title("📈 Sales Analysis")
+        
+        # Daily Sales Analysis
+        st.subheader("📅 Daily Sales Report")
+
+        if "Date" in sales_df.columns:
+            daily_df = sales_df.copy()
+
+            daily_df["Date"] = pd.to_datetime(
+                daily_df["Date"], errors="coerce"
+            )
+
+            daily_df = daily_df.dropna(subset=["Date"])
+
+            daily_df = daily_df.merge(
+                products_df[["Product", "Selling_Price"]],
+                on="Product",
+                how="left"
+            )
+
+            daily_df["Revenue"] = (
+                daily_df["Quantity_Sold"]
+                * daily_df["Selling_Price"]
+            )
+
+            daily_summary = (
+                daily_df.groupby("Date", as_index=False)
+                .agg(
+                    Units_Sold=("Quantity_Sold", "sum"),
+                    Revenue=("Revenue", "sum")
+                )
+                .sort_values("Date")
+            )
+
+            if not daily_summary.empty:
+                st.line_chart(
+                    daily_summary.set_index("Date")[["Revenue"]]
+                )
+
+                st.dataframe(
+                    daily_summary,
+                    use_container_width=True
+                )
+            else:
+                st.info("No valid dated sales records found.")
+
+        else:
+            st.info(
+                "Your sales.csv needs a Date column. "
+                "Add dates through the Sales Entry page first."
+            )
+        
+        # Daily Profit Analysis
+        st.subheader("💰 Daily Profit Report")
+
+        daily_profit_df = sales_df.copy()
+
+        daily_profit_df = daily_profit_df.merge(
+            products_df[
+                ["Product", "Purchase_Price", "Selling_Price"]
+            ],
+            on="Product",
+            how="left"
+        )
+
+        daily_profit_df["Profit"] = (
+            daily_profit_df["Selling_Price"]
+            - daily_profit_df["Purchase_Price"]
+        ) * daily_profit_df["Quantity_Sold"]
+
+        if "Date" in daily_profit_df.columns:
+            daily_profit_df["Date"] = pd.to_datetime(
+                daily_profit_df["Date"],
+                errors="coerce"
+            )
+
+            daily_profit_df = daily_profit_df.dropna(
+                subset=["Date"]
+            )
+
+            profit_summary = (
+                daily_profit_df.groupby("Date", as_index=False)
+                ["Profit"].sum()
+                .sort_values("Date")
+            )
+
+            if not profit_summary.empty:
+                st.line_chart(
+                    profit_summary.set_index("Date")
+                )
+                st.dataframe(
+                    profit_summary,
+                    use_container_width=True
+                )
+            else:
+                st.info("No dated sales records available.")
+        else:
+            st.info("Add a Date column to sales.csv first.")
+
+        selected_products = st.multiselect(
+            "Choose products",
+            options=df["Product"].tolist(),
+            default=df["Product"].tolist()
+        )
+
+        filtered_df = df[
+            df["Product"].isin(selected_products)
+        ]
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric(
+            "Units Sold",
+            int(filtered_df["Quantity_Sold"].sum())
+        )
+        col2.metric(
+            "Revenue",
+            f"₹{filtered_df['Revenue'].sum():,.2f}"
+        )
+        col3.metric(
+            "Profit",
+            f"₹{filtered_df['Profit'].sum():,.2f}"
+        )
+
+        st.subheader("Sales Comparison")
+        st.bar_chart(
+            filtered_df, x="Product", y="Quantity_Sold"
+        )
+
+        st.subheader("Revenue and Profit")
+        st.dataframe(
+            filtered_df[
+                ["Product", "Quantity_Sold", "Revenue", "Profit"]
+            ],
+            use_container_width=True
+        )
+
+    # -----------------------------------
+    # PAGE 3: INVENTORY MANAGEMENT
+    # -----------------------------------
+    elif page == "Inventory Management":
+        st.title("📦 Inventory Management")
+
+        status_options = df["Stock_Advice"].unique().tolist()
+
+        selected_status = st.multiselect(
+            "Filter by stock status",
+            options=status_options,
+            default=status_options
+        )
+
+        inventory_df = df[
+            df["Stock_Advice"].isin(selected_status)
+        ]
+
+        st.dataframe(
+            inventory_df[
+                [
+                    "Product",
+                    "Stock",
+                    "Quantity_Sold",
+                    "Recommended_Order",
+                    "Stock_Advice"
+                ]
+            ],
+            use_container_width=True
+        )
+
+        low_stock = df[df["Stock"] <= 20]
+
+        if not low_stock.empty:
+            st.warning(
+                f"{len(low_stock)} product(s) have 20 or fewer units."
+            )
+        else:
+            st.success("No products meet the low-stock threshold.")
+
+    # -----------------------------------
+    # PAGE 4: BUSINESS RECOMMENDATIONS
+    # -----------------------------------
+    elif page == "Business Recommendations":
+        st.title("💡 Smart Business Recommendations")
+
+        best_seller = df.loc[df["Quantity_Sold"].idxmax()]
+        best_profit = df.loc[df["Profit"].idxmax()]
+
+        st.info(
+            f"🏆 Best-selling product: {best_seller['Product']} "
+            f"({int(best_seller['Quantity_Sold'])} units sold)"
+        )
+
+        st.success(
+            f"💰 Highest-profit product: {best_profit['Product']} "
+            f"(₹{best_profit['Profit']:,.2f} gross profit)"
+        )
+
+        attention = df[
+            df["Stock_Advice"].isin(
+                ["Urgent Restock", "Restock Soon", "Check Demand"]
+            )
+        ]
+
+        st.subheader("Restocking Suggestions")
+
+        if attention.empty:
+            st.success("No products currently need a stock review.")
+        else:
+            st.dataframe(
+                attention[
+                    [
+                        "Product",
+                        "Stock",
+                        "Quantity_Sold",
+                        "Recommended_Order",
+                        "Stock_Advice"
+                    ]
+                ],
+                use_container_width=True
+            )
+            
+    # SALES ENTRY PAGE
+    elif page == "Sales Entry":
+        st.title("🛒 Record a New Sale")
+        st.write("Enter the details of the customer's purchase.")
+
+        with st.form("sales_entry_form"):
+            product = st.selectbox(
+                "Select Product",
+                products_df["Product"].tolist()
+            )
+
+            quantity = st.number_input(
+                "Quantity Sold",
+                min_value=1,
+                step=1,
+                value=1
+            )
+
+            sale_date = st.date_input(
+                "Sale Date",
+                value=pd.Timestamp.today().date()
+            )
+
+            submitted = st.form_submit_button(
+                "Save Sale",
+                use_container_width=True
+            )
+
+        if submitted:
+            product_row = products_df[
+                products_df["Product"] == product
+            ]
+
+            current_stock = int(product_row.iloc[0]["Stock"])
+
+            if quantity > current_stock:
+                st.error(
+                    f"Only {current_stock} units are in stock. "
+                    "Please enter a smaller quantity."
+                )
+
+            else:
+                try:
+                    # Prepare the new sales record
+                    new_sale = pd.DataFrame([{
+                        "Date": sale_date.strftime("%Y-%m-%d"),
+                        "Product": product,
+                        "Quantity_Sold": int(quantity)
+                    }])
+
+                    # Append the sale to sales.csv
+                    sales_path = BASE_DIR / "sales.csv"
+
+                    updated_sales = pd.concat(
+                        [sales_df, new_sale],
+                        ignore_index=True
+                    )
+
+                    updated_sales.to_csv(
+                        sales_path,
+                        index=False
+                    )
+
+                    # Reduce available stock
+                    product_index = product_row.index[0]
+                    products_df.loc[
+                        product_index, "Stock"
+                    ] = current_stock - int(quantity)
+
+                    products_df.to_csv(
+                        BASE_DIR / "products.csv",
+                        index=False
+                    )
+
+                    st.success(
+                        f"Sale saved! {quantity} units of "
+                        f"{product} recorded for "
+                        f"{sale_date.strftime('%d-%m-%Y')}."
+                    )
+
+                    st.info(
+                        "Refresh the page to update your dashboard."
+                    )
+
+                except Exception as error:
+                    st.error(f"Could not save the sale: {error}")
+
+
+except FileNotFoundError as error:
+    st.error(f"CSV file not found: {error.filename}")
+
+except Exception as error:
+    st.error(f"Something went wrong: {error}")
 
